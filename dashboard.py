@@ -29,18 +29,15 @@ unit_cost_bdt = 6
 csv_path = "energy_history.csv"
 backup_path = "session_backup.json"
 
-# Local device credentials (used when not in Streamlit Cloud)
-
+# Local device credentials
 LOCAL_KEY = "ZD@.!(|l[$V|3K=F"
 LOCAL_IP = "192.168.68.107"
 VERSION = 3.5
-
 
 if not IS_CLOUD:
     device = tinytuya.OutletDevice(DEVICE_ID, LOCAL_IP, LOCAL_KEY)
     device.set_version(VERSION)
 
-# Tuya Cloud API setup
 cloud = tinytuya.Cloud(
     apiRegion=st.secrets["API_REGION"],
     apiKey=st.secrets["API_KEY"],
@@ -119,11 +116,11 @@ def toggle_device(state: bool):
         if IS_CLOUD:
             cloud.sendcommand(DEVICE_ID, [{"code": "switch_1", "value": state}])
         else:
-            _ = device.turn_on() if state else device.turn_off()  # <-- suppress output
-        st.success(f"Device turned {'ON' if state else 'OFF'}")
+            _ = device.turn_on() if state else device.turn_off()
+        time.sleep(1.5)  # Wait for status to sync
+        st.rerun()
     except Exception as e:
         st.error(f"Error: {e}")
-
 
 def schedule_auto_off(hours: float):
     st.session_state.scheduled_off_time = datetime.now() + timedelta(hours=hours)
@@ -194,8 +191,6 @@ st.markdown("""
 if st.button("🔁 Refresh Status"):
     st.rerun()
 
-
-
 # ------------------- Load Device Data & Show Status -------------------
 with st.spinner("Loading device data..."):
     df, status = update_history_row()
@@ -261,17 +256,7 @@ else:
             font=dict(color="white")
         )
         st.plotly_chart(fig, use_container_width=True)
-# ------------------- Download History -------------------
-st.subheader("📥 Download Energy History")
 
-if not df.empty:
-    csv_data = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="📄 Download CSV",
-        data=csv_data,
-        file_name="energy_history.csv",
-        mime="text/csv",
-        help="Click to download all recorded energy readings as a CSV file"
-    )
-else:
-    st.info("No history available yet to download.")
+    # ------------------- Download Button -------------------
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download Energy History CSV", csv, "energy_history.csv", "text/csv")
