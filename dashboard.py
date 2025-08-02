@@ -136,10 +136,22 @@ def build_gauge(label, value, max_value):
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=value,
-        title={'text': label},
-        gauge={'axis': {'range': [0, max_value]}, 'bar': {'color': "lightblue"}}
+        title={'text': label, 'font': {'color': "white"}},
+        gauge={
+            'axis': {'range': [0, max_value], 'tickcolor': "white"},
+            'bar': {'color': "#00BFFF"},
+            'bgcolor': "black",
+            'borderwidth': 1,
+            'bordercolor': "gray"
+        },
+        number={'font': {'color': "white"}}
     ))
-    fig.update_layout(margin=dict(t=10, b=0, l=0, r=0))
+    fig.update_layout(
+        paper_bgcolor="black",
+        plot_bgcolor="black",
+        font={'color': "white"},
+        margin=dict(t=10, b=0, l=0, r=0)
+    )
     return fig
 
 # ------------------- UI Layout -------------------
@@ -167,7 +179,6 @@ if col2.button("🟢 Turn ON"):
 if col3.button("⏰ Auto-Off in 1 Hour"):
     schedule_auto_off(1.0)
 
-# Auto-Off Countdown
 if st.session_state.auto_off_active:
     time_left = st.session_state.scheduled_off_time - datetime.now()
     if time_left.total_seconds() <= 0:
@@ -184,7 +195,6 @@ m1.metric("Power (W)", f"{power:.1f}")
 m2.metric("Voltage (V)", f"{voltage:.1f}")
 m3.metric("Current (mA)", f"{current_ma:.1f}")
 
-# Gauges
 g1, g2, g3 = st.columns(3)
 g1.plotly_chart(build_gauge("Power (W)", power, 3000), use_container_width=True)
 g2.plotly_chart(build_gauge("Voltage (V)", voltage, 250), use_container_width=True)
@@ -196,12 +206,10 @@ st.info(f"**Total Energy Used:** {kwh:.4f} kWh")
 st.info(f"**Estimated Cost:** ৳{cost:.2f}")
 st.info(f"**Active Duration:** {duration} min")
 
-# ------------------- History Charts -------------------
+# ------------------- Plots -------------------
 if df.empty:
     st.warning("No energy history data yet. Please wait 1 minute.")
 else:
-    st.subheader("📈 Historical Trends")
-
     charts = {
         "Power (W)": "Power (W)",
         "Voltage (V)": "Voltage (V)",
@@ -212,4 +220,9 @@ else:
 
     for title, column in charts.items():
         fig = px.line(df, x="Time", y=column, title=title + " Over Time", template=plotly_template)
+        fig.update_layout(
+            paper_bgcolor="black",
+            plot_bgcolor="black",
+            font=dict(color="white")
+        )
         st.plotly_chart(fig, use_container_width=True)
