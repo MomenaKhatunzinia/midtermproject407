@@ -261,3 +261,17 @@ else:
             font=dict(color="white")
         )
         st.plotly_chart(fig, use_container_width=True)
+# ------------------- Download History -------------------
+st.subheader("📥 Download Energy History")
+
+if not df.empty:
+    csv_data = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📄 Download CSV",
+        data=csv_data,
+        file_name="energy_history.csv",
+        mime="text/csv",
+        help="Click to download all recorded energy readings as a CSV file"
+    )
+else:
+    st.info("No history available yet to download.")
