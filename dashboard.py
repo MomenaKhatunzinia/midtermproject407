@@ -22,17 +22,31 @@ if os.path.exists(css_file):
 
 plotly_template = "plotly_dark" if theme == "Dark" else "plotly"
 
-# ------------------- Tuya Cloud Setup -------------------
-cloud = tinytuya.Cloud(
-    apiRegion=st.secrets["API_REGION"],
-    apiKey=st.secrets["API_KEY"],
-    apiSecret=st.secrets["API_SECRET"],
-    apiDeviceID=st.secrets["DEVICE_ID"]
-)
+# ------------------- Setup -------------------
+IS_CLOUD = os.getenv("STREAMLIT_CLOUD", "0") == "1"
 DEVICE_ID = st.secrets["DEVICE_ID"]
 unit_cost_bdt = 6
 csv_path = "energy_history.csv"
 backup_path = "session_backup.json"
+
+# Local device credentials (used when not in Streamlit Cloud)
+
+LOCAL_KEY = "ZD@.!(|l[$V|3K=F"
+LOCAL_IP = "192.168.68.107"
+VERSION = 3.5
+
+
+if not IS_CLOUD:
+    device = tinytuya.OutletDevice(DEVICE_ID, LOCAL_IP, LOCAL_KEY)
+    device.set_version(VERSION)
+
+# Tuya Cloud API setup
+cloud = tinytuya.Cloud(
+    apiRegion=st.secrets["API_REGION"],
+    apiKey=st.secrets["API_KEY"],
+    apiSecret=st.secrets["API_SECRET"],
+    apiDeviceID=DEVICE_ID
+)
 
 # ------------------- Session State Init -------------------
 defaults = {
@@ -70,12 +84,22 @@ def get_device_status_cached():
 # ------------------- Device Logic -------------------
 def get_device_status():
     try:
-        power_on, power, voltage, current, dps = get_device_status_cached()
+        if IS_CLOUD:
+            power_on, power, voltage, current, dps = get_device_status_cached()
+        else:
+            status = device.status()
+            dps = status.get("dps", {})
+            power_on = dps.get('1', False)
+            power = dps.get('19', 0) / 10.0
+            voltage = dps.get('20', 0) / 10.0
+            current = dps.get('18', 0) / 1000.0
+
         now = time.time()
         delta_hours = (now - st.session_state.last_update_time) / 3600.0
         st.session_state.last_update_time = now
         st.session_state.accumulated_kwh += (power / 1000.0) * delta_hours
         cost = st.session_state.accumulated_kwh * unit_cost_bdt
+        current_ma = current * 1000 if not IS_CLOUD else current
 
         if power_on:
             if not st.session_state.on_time:
@@ -85,17 +109,21 @@ def get_device_status():
             st.session_state.on_time = None
             st.session_state.duration_minutes = 0
 
-        return power_on, power, voltage, current, st.session_state.accumulated_kwh, cost, st.session_state.duration_minutes
+        return power_on, power, voltage, current_ma, st.session_state.accumulated_kwh, cost, st.session_state.duration_minutes
     except Exception as e:
         st.warning(f"Error fetching status: {e}")
         return False, 0, 0, 0, 0, 0, 0
 
 def toggle_device(state: bool):
     try:
-        cloud.sendcommand(DEVICE_ID, [{"code": "switch_1", "value": state}])
+        if IS_CLOUD:
+            cloud.sendcommand(DEVICE_ID, [{"code": "switch_1", "value": state}])
+        else:
+            _ = device.turn_on() if state else device.turn_off()  # <-- suppress output
         st.success(f"Device turned {'ON' if state else 'OFF'}")
     except Exception as e:
         st.error(f"Error: {e}")
+
 
 def schedule_auto_off(hours: float):
     st.session_state.scheduled_off_time = datetime.now() + timedelta(hours=hours)
@@ -163,14 +191,16 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-st.button("🔁 Refresh Status", on_click=st.rerun)
+if st.button("🔁 Refresh Status"):
+    st.rerun()
+
+
 
 # ------------------- Load Device Data & Show Status -------------------
 with st.spinner("Loading device data..."):
     df, status = update_history_row()
     power_on, power, voltage, current_ma, kwh, cost, duration = status
 
-# ------------------- Device Status Display -------------------
 device_status = "🟢 Device is ON" if power_on else "🔴 Device is OFF"
 st.markdown(f"### {device_status}")
 
