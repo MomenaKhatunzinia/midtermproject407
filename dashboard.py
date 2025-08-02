@@ -23,21 +23,20 @@ if os.path.exists(css_file):
 plotly_template = "plotly_dark" if theme == "Dark" else "plotly"
 
 # ------------------- Setup -------------------
-IS_CLOUD = os.getenv("STREAMLIT_CLOUD", "0") == "1"
 DEVICE_ID = st.secrets["DEVICE_ID"]
 unit_cost_bdt = 6
 csv_path = "energy_history.csv"
 backup_path = "session_backup.json"
 
-# Local device credentials
+# Local device credentials (to keep ON/OFF working)
 LOCAL_KEY = "ZD@.!(|l[$V|3K=F"
 LOCAL_IP = "192.168.68.107"
 VERSION = 3.5
 
-if not IS_CLOUD:
-    device = tinytuya.OutletDevice(DEVICE_ID, LOCAL_IP, LOCAL_KEY)
-    device.set_version(VERSION)
+device = tinytuya.OutletDevice(DEVICE_ID, LOCAL_IP, LOCAL_KEY)
+device.set_version(VERSION)
 
+# Tuya Cloud API setup
 cloud = tinytuya.Cloud(
     apiRegion=st.secrets["API_REGION"],
     apiKey=st.secrets["API_KEY"],
@@ -67,36 +66,23 @@ if 'last_update_time' not in st.session_state or 'accumulated_kwh' not in st.ses
         st.session_state.accumulated_kwh = 0.0
         st.session_state.last_update_time = time.time()
 
-# ------------------- Cached Status -------------------
-@st.cache_data(ttl=15)
-def get_device_status_cached():
-    response = cloud.getstatus(DEVICE_ID)
-    dps = {item["code"]: item["value"] for item in response.get("result", [])}
-    power_on = dps.get("switch_1", False)
-    power = dps.get("cur_power", 0) / 10.0
-    voltage = dps.get("cur_voltage", 0) / 10.0
-    current = dps.get("cur_current", 0)
-    return power_on, power, voltage, current, dps
-
 # ------------------- Device Logic -------------------
+@st.cache_data(ttl=15)
 def get_device_status():
     try:
-        if IS_CLOUD:
-            power_on, power, voltage, current, dps = get_device_status_cached()
-        else:
-            status = device.status()
-            dps = status.get("dps", {})
-            power_on = dps.get('1', False)
-            power = dps.get('19', 0) / 10.0
-            voltage = dps.get('20', 0) / 10.0
-            current = dps.get('18', 0) / 1000.0
+        response = cloud.getstatus(DEVICE_ID)
+        dps = {item["code"]: item["value"] for item in response.get("result", [])}
+        power_on = dps.get("switch_1", False)
+        power = dps.get("cur_power", 0) / 10.0
+        voltage = dps.get("cur_voltage", 0) / 10.0
+        current = dps.get("cur_current", 0)
 
         now = time.time()
         delta_hours = (now - st.session_state.last_update_time) / 3600.0
         st.session_state.last_update_time = now
         st.session_state.accumulated_kwh += (power / 1000.0) * delta_hours
         cost = st.session_state.accumulated_kwh * unit_cost_bdt
-        current_ma = current * 1000 if not IS_CLOUD else current
+        current_ma = current
 
         if power_on:
             if not st.session_state.on_time:
@@ -113,20 +99,24 @@ def get_device_status():
 
 def toggle_device(state: bool):
     try:
-        if IS_CLOUD:
-            cloud.sendcommand(DEVICE_ID, [{"code": "switch_1", "value": state}])
+        if state:
+            device.turn_on()
         else:
-            _ = device.turn_on() if state else device.turn_off()
-        time.sleep(1.5)  # Wait for status to sync
+            device.turn_off()
+        st.toast("Toggled!", icon="⚡")
+        time.sleep(3)
+        st.cache_data.clear()
         st.rerun()
     except Exception as e:
         st.error(f"Error: {e}")
 
+# ------------------- Auto-Off -------------------
 def schedule_auto_off(hours: float):
     st.session_state.scheduled_off_time = datetime.now() + timedelta(hours=hours)
     st.session_state.auto_off_active = True
     st.success(f"Auto-off scheduled at {st.session_state.scheduled_off_time.strftime('%H:%M:%S')}")
 
+# ------------------- Update History -------------------
 def update_history_row():
     now = datetime.now()
     if 'last_log_time' not in st.session_state or len(st.session_state.history) == 0:
@@ -157,6 +147,7 @@ def update_history_row():
         }, f)
     return df, status
 
+# ------------------- Gauges -------------------
 def build_gauge(label, value, max_value):
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -189,6 +180,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if st.button("🔁 Refresh Status"):
+    st.cache_data.clear()
     st.rerun()
 
 # ------------------- Load Device Data & Show Status -------------------
@@ -196,6 +188,7 @@ with st.spinner("Loading device data..."):
     df, status = update_history_row()
     power_on, power, voltage, current_ma, kwh, cost, duration = status
 
+# Refresh UI always with live status
 device_status = "🟢 Device is ON" if power_on else "🔴 Device is OFF"
 st.markdown(f"### {device_status}")
 
@@ -219,7 +212,7 @@ if st.session_state.auto_off_active:
         st.info(f"⏳ Auto-off in {str(time_left).split('.')[0]}")
 
 # ------------------- Metrics -------------------
-st.subheader("📟 Real-Time Metrics")
+st.subheader("📿 Real-Time Metrics")
 m1, m2, m3 = st.columns(3)
 m1.metric("Power (W)", f"{power:.1f}")
 m2.metric("Voltage (V)", f"{voltage:.1f}")
@@ -236,10 +229,12 @@ st.info(f"**Total Energy Used:** {kwh:.4f} kWh")
 st.info(f"**Estimated Cost:** ৳{cost:.2f}")
 st.info(f"**Active Duration:** {duration} min")
 
-# ------------------- Plots -------------------
+# ------------------- Download & Plots -------------------
 if df.empty:
     st.warning("No energy history data yet. Please wait 1 minute.")
 else:
+    st.download_button("📅 Download Energy History (CSV)", data=df.to_csv(index=False), file_name="energy_history.csv", mime="text/csv")
+
     charts = {
         "Power (W)": "Power (W)",
         "Voltage (V)": "Voltage (V)",
@@ -256,7 +251,3 @@ else:
             font=dict(color="white")
         )
         st.plotly_chart(fig, use_container_width=True)
-
-    # ------------------- Download Button -------------------
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Energy History CSV", csv, "energy_history.csv", "text/csv")
