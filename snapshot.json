@@ -1,0 +1,49 @@
+{
+    "timestamp": 1754033677.3679812,
+    "devices": [
+        {
+            "id": "bf1fb51a6032098478au4s",
+            "ip": "192.168.68.107",
+            "uuid": "4a97852e54ef3401",
+            "active": 2,
+            "encrypt": true,
+            "productKey": "uqehhcrmk5depvtl",
+            "token": true,
+            "wf_cfg": true,
+            "sl": 0,
+            "clientLink": 3,
+            "name": "Smart Plug",
+            "key": "ZD@.!(|l[$V|3K=F",
+            "mac": "c0:f8:53:53:27:3a",
+            "ability": 0,
+            "dev_type": "default",
+            "err": "",
+            "type": "default",
+            "dps": {
+                "dps": {
+                    "1": true,
+                    "9": 0,
+                    "17": 29,
+                    "18": 564,
+                    "19": 754,
+                    "20": 2316,
+                    "21": 1,
+                    "22": 555,
+                    "23": 29371,
+                    "24": 15834,
+                    "25": 2630,
+                    "26": 0,
+                    "38": "memory",
+                    "39": "relay",
+                    "40": false,
+                    "41": "",
+                    "42": "",
+                    "43": "",
+                    "51": false
+                }
+            },
+            "origin": "broadcast",
+            "ver": "3.5"
+        }
+    ]
+}

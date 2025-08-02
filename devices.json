@@ -1,0 +1,127 @@
+[
+    {
+        "name": "Smart Plug",
+        "id": "bf1fb51a6032098478au4s",
+        "key": "ZD@.!(|l[$V|3K=F",
+        "mac": "c0:f8:53:53:27:3a",
+        "uuid": "4a97852e54ef3401",
+        "category": "cz",
+        "product_name": "Smart Plug",
+        "product_id": "uqehhcrmk5depvtl",
+        "biz_type": 0,
+        "model": "\u767e\u89c6\u76fe\u8ba1\u91cf",
+        "sub": false,
+        "icon": "https://images.tuyaeu.com/smart/icon/ay15107356719526e3ps/f1d0c8ad0822636028bd9117522687db.png",
+        "mapping": {
+            "1": {
+                "code": "switch_1",
+                "type": "Boolean",
+                "values": {}
+            },
+            "9": {
+                "code": "countdown_1",
+                "type": "Integer",
+                "values": {
+                    "unit": "s",
+                    "min": 0,
+                    "max": 86400,
+                    "scale": 0,
+                    "step": 1
+                }
+            },
+            "17": {
+                "code": "add_ele",
+                "type": "Integer",
+                "values": {
+                    "unit": "kwh",
+                    "min": 0,
+                    "max": 50000,
+                    "scale": 3,
+                    "step": 100
+                }
+            },
+            "18": {
+                "code": "cur_current",
+                "type": "Integer",
+                "values": {
+                    "unit": "mA",
+                    "min": 0,
+                    "max": 80000,
+                    "scale": 0,
+                    "step": 1
+                }
+            },
+            "19": {
+                "code": "cur_power",
+                "type": "Integer",
+                "values": {
+                    "unit": "W",
+                    "min": 0,
+                    "max": 200000,
+                    "scale": 1,
+                    "step": 1
+                }
+            },
+            "20": {
+                "code": "cur_voltage",
+                "type": "Integer",
+                "values": {
+                    "unit": "V",
+                    "min": 0,
+                    "max": 5000,
+                    "scale": 1,
+                    "step": 1
+                }
+            },
+            "38": {
+                "code": "relay_status",
+                "type": "Enum",
+                "values": {
+                    "range": [
+                        "power_off",
+                        "power_on",
+                        "last"
+                    ]
+                }
+            },
+            "39": {
+                "code": "light_mode",
+                "type": "Enum",
+                "values": {
+                    "range": [
+                        "relay",
+                        "pos",
+                        "none"
+                    ]
+                }
+            },
+            "40": {
+                "code": "child_lock",
+                "type": "Boolean",
+                "values": {}
+            },
+            "41": {
+                "code": "cycle_time",
+                "type": "String",
+                "values": "{}"
+            },
+            "42": {
+                "code": "random_time",
+                "type": "String",
+                "values": "{}"
+            },
+            "43": {
+                "code": "switch_inching",
+                "type": "String",
+                "values": "{}"
+            },
+            "51": {
+                "code": "overcharge_switch",
+                "type": "Boolean",
+                "values": {}
+            }
+        },
+        "ip": "192.168.68.107",
+        "version": "3.5"
+    }
+]
