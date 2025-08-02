@@ -1,13 +1,26 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
+import plotly.express as px
 import tinytuya
 import os
 import json
 import time
 from datetime import datetime, timedelta
-from streamlit_autorefresh import st_autorefresh
+
+# ------------------- Theme Toggle -------------------
+if "theme" not in st.session_state:
+    st.session_state.theme = "Light"
+
+theme = st.sidebar.radio("🌗 Theme", ["Light", "Dark"], index=["Light", "Dark"].index(st.session_state.theme))
+st.session_state.theme = theme
+
+css_file = f"styles/{theme.lower()}.css"
+if os.path.exists(css_file):
+    with open(css_file) as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+plotly_template = "plotly_dark" if theme == "Dark" else "plotly"
 
 # ------------------- Tuya Cloud Setup -------------------
 cloud = tinytuya.Cloud(
@@ -21,17 +34,18 @@ unit_cost_bdt = 6
 csv_path = "energy_history.csv"
 backup_path = "session_backup.json"
 
-# ------------------- Session State -------------------
-if 'scheduled_off_time' not in st.session_state:
-    st.session_state.scheduled_off_time = None
-if 'auto_off_active' not in st.session_state:
-    st.session_state.auto_off_active = False
-if 'history' not in st.session_state:
-    st.session_state.history = pd.read_csv(csv_path, parse_dates=['Time']).to_dict('records') if os.path.exists(csv_path) else []
-if 'on_time' not in st.session_state:
-    st.session_state.on_time = None
-if 'duration_minutes' not in st.session_state:
-    st.session_state.duration_minutes = 0
+# ------------------- Session State Init -------------------
+defaults = {
+    'scheduled_off_time': None,
+    'auto_off_active': False,
+    'on_time': None,
+    'duration_minutes': 0,
+    'history': pd.read_csv(csv_path, parse_dates=['Time']).to_dict('records') if os.path.exists(csv_path) else [],
+}
+for key, val in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = val
+
 if 'last_update_time' not in st.session_state or 'accumulated_kwh' not in st.session_state:
     if os.path.exists(backup_path):
         with open(backup_path) as f:
@@ -42,20 +56,25 @@ if 'last_update_time' not in st.session_state or 'accumulated_kwh' not in st.ses
         st.session_state.accumulated_kwh = 0.0
         st.session_state.last_update_time = time.time()
 
-# ------------------- Cloud Functions -------------------
+# ------------------- Cached Status -------------------
+@st.cache_data(ttl=15)
+def get_device_status_cached():
+    response = cloud.getstatus(DEVICE_ID)
+    dps = {item["code"]: item["value"] for item in response.get("result", [])}
+    power_on = dps.get("switch_1", False)
+    power = dps.get("cur_power", 0) / 10.0
+    voltage = dps.get("cur_voltage", 0) / 10.0
+    current = dps.get("cur_current", 0)
+    return power_on, power, voltage, current, dps
+
+# ------------------- Device Logic -------------------
 def get_device_status():
     try:
-        response = cloud.getstatus(DEVICE_ID)
-        dps = {item["code"]: item["value"] for item in response.get("status", [])}
-        power_on = dps.get("switch_1", False)
-        power = dps.get("cur_power", 0) / 10.0
-        voltage = dps.get("cur_voltage", 0) / 10.0
-        current = dps.get("cur_current", 0)
-
-        current_time = time.time()
-        delta_time_hours = (current_time - st.session_state.last_update_time) / 3600.0
-        st.session_state.last_update_time = current_time
-        st.session_state.accumulated_kwh += (power / 1000.0) * delta_time_hours
+        power_on, power, voltage, current, dps = get_device_status_cached()
+        now = time.time()
+        delta_hours = (now - st.session_state.last_update_time) / 3600.0
+        st.session_state.last_update_time = now
+        st.session_state.accumulated_kwh += (power / 1000.0) * delta_hours
         cost = st.session_state.accumulated_kwh * unit_cost_bdt
 
         if power_on:
@@ -68,7 +87,7 @@ def get_device_status():
 
         return power_on, power, voltage, current, st.session_state.accumulated_kwh, cost, st.session_state.duration_minutes
     except Exception as e:
-        st.warning(f"Error: {e}")
+        st.warning(f"Error fetching status: {e}")
         return False, 0, 0, 0, 0, 0, 0
 
 def toggle_device(state: bool):
@@ -76,16 +95,24 @@ def toggle_device(state: bool):
         cloud.sendcommand(DEVICE_ID, [{"code": "switch_1", "value": state}])
         st.success(f"Device turned {'ON' if state else 'OFF'}")
     except Exception as e:
-        st.error(f"Error toggling device: {e}")
+        st.error(f"Error: {e}")
 
 def schedule_auto_off(hours: float):
     st.session_state.scheduled_off_time = datetime.now() + timedelta(hours=hours)
     st.session_state.auto_off_active = True
-    st.success(f"Device will auto turn off at {st.session_state.scheduled_off_time.strftime('%H:%M:%S')}")
+    st.success(f"Auto-off scheduled at {st.session_state.scheduled_off_time.strftime('%H:%M:%S')}")
 
 def update_history_row():
     now = datetime.now()
+    if 'last_log_time' not in st.session_state or len(st.session_state.history) == 0:
+        st.session_state.last_log_time = time.time() - 61
+
+    if time.time() - st.session_state.last_log_time < 60:
+        status = get_device_status()
+        return pd.DataFrame(st.session_state.history), status
+
     status = get_device_status()
+    st.session_state.last_log_time = time.time()
     record = {
         "Time": now,
         "Current (mA)": status[3],
@@ -115,9 +142,8 @@ def build_gauge(label, value, max_value):
     fig.update_layout(margin=dict(t=10, b=0, l=0, r=0))
     return fig
 
-# ------------------- UI -------------------
+# ------------------- UI Layout -------------------
 st.set_page_config(page_title="IoT Dashboard | Zinia", layout="wide")
-st_autorefresh(interval=60000, limit=None, key="refresh")
 
 st.markdown("""
     <div style="background-color:#1c3d57;padding:20px 20px 5px 20px;border-radius:10px;text-align:center">
@@ -125,88 +151,65 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-df, status = update_history_row()
-power_on, power, voltage, current_ma, kwh, cost, duration = status
+st.button("🔁 Refresh Status", on_click=st.rerun)
 
-# ------------------- Device Control -------------------
+with st.spinner("Loading device data..."):
+    df, status = update_history_row()
+    power_on, power, voltage, current_ma, kwh, cost, duration = status
+
+# ------------------- Device Control Section -------------------
 st.subheader("🔌 Device Control")
-col_on, col_off, col_status = st.columns([1, 1, 2])
-with col_on:
-    if st.button("🔋 Turn ON"):
-        toggle_device(True)
-with col_off:
-    if st.button("⛔ Turn OFF"):
-        toggle_device(False)
-with col_status:
-    status_text = "🟢 ON" if power_on else "🔴 OFF"
-    st.markdown(f"<div style='text-align:right; color:white; font-weight:bold;'>Device Status: {status_text}</div>", unsafe_allow_html=True)
-
-# ------------------- Auto Turn-Off Scheduler -------------------
-st.markdown("---")
-st.subheader("⏲️ Auto Turn-Off Scheduler")
-col3, col4 = st.columns([2, 3])
-with col3:
-    hours = st.slider("Set auto turn-off duration (in hours):", 1, 24, 6)
-    if not st.session_state.auto_off_active:
-        if st.button("Schedule Auto-Off"):
-            schedule_auto_off(hours)
-    else:
-        if st.button("Cancel Auto-Off"):
-            st.session_state.scheduled_off_time = None
-            st.session_state.auto_off_active = False
-            st.info("Auto-off schedule cancelled.")
-if st.session_state.scheduled_off_time and datetime.now() >= st.session_state.scheduled_off_time:
+col1, col2, col3 = st.columns(3)
+if col1.button("🔴 Turn OFF"):
     toggle_device(False)
-    st.session_state.scheduled_off_time = None
-    st.session_state.auto_off_active = False
+if col2.button("🟢 Turn ON"):
+    toggle_device(True)
+if col3.button("⏰ Auto-Off in 1 Hour"):
+    schedule_auto_off(1.0)
 
-# ------------------- Gauges -------------------
-st.subheader("📟 Real-Time Device Metrics")
-c1, c2, c3 = st.columns(3)
-with c1:
-    st.plotly_chart(build_gauge("Current (mA)", current_ma, 2000), use_container_width=True)
-with c2:
-    st.plotly_chart(build_gauge("Power (W)", power, 2500), use_container_width=True)
-with c3:
-    st.plotly_chart(build_gauge("Voltage (V)", voltage, 260), use_container_width=True)
-c4, c5, c6 = st.columns(3)
-with c4:
-    st.plotly_chart(build_gauge("Energy (kWh)", kwh, 10), use_container_width=True)
-with c5:
-    st.plotly_chart(build_gauge("Total Cost (BDT)", cost, 500), use_container_width=True)
-with c6:
-    st.plotly_chart(build_gauge("ON Duration (min)", duration, 1440), use_container_width=True)
+# Auto-Off Countdown
+if st.session_state.auto_off_active:
+    time_left = st.session_state.scheduled_off_time - datetime.now()
+    if time_left.total_seconds() <= 0:
+        toggle_device(False)
+        st.session_state.auto_off_active = False
+        st.success("✅ Auto-off executed.")
+    else:
+        st.info(f"⏳ Auto-off in {str(time_left).split('.')[0]}")
 
-# ------------------- Donut -------------------
-fig_donut = px.pie(
-    names=["ON", "OFF"],
-    values=[duration, max(1, 1440 - duration)],
-    hole=0.5,
-    title="Today's Power Usage Distribution",
-    color_discrete_sequence=px.colors.qualitative.Set3
-)
-st.plotly_chart(fig_donut, use_container_width=True)
+# ------------------- Metrics -------------------
+st.subheader("📟 Real-Time Metrics")
+m1, m2, m3 = st.columns(3)
+m1.metric("Power (W)", f"{power:.1f}")
+m2.metric("Voltage (V)", f"{voltage:.1f}")
+m3.metric("Current (mA)", f"{current_ma:.1f}")
 
-# ------------------- Trend -------------------
-st.subheader("📊 Energy & Cost Over Time")
-fig1 = go.Figure()
-fig1.add_trace(go.Scatter(x=df['Time'], y=df['Energy (kWh)'], name="Energy (kWh)", mode='lines+markers'))
-fig1.add_trace(go.Scatter(x=df['Time'], y=df['Cost (BDT)'], name="Cost (BDT)", mode='lines+markers'))
-fig1.update_layout(template="plotly_dark", xaxis_title="Time", yaxis_title="Value")
-st.plotly_chart(fig1, use_container_width=True)
+# Gauges
+g1, g2, g3 = st.columns(3)
+g1.plotly_chart(build_gauge("Power (W)", power, 3000), use_container_width=True)
+g2.plotly_chart(build_gauge("Voltage (V)", voltage, 250), use_container_width=True)
+g3.plotly_chart(build_gauge("Current (mA)", current_ma, 15000), use_container_width=True)
 
-st.subheader("📉 Full Metric Trend")
-fig2 = go.Figure()
-fig2.add_trace(go.Scatter(x=df['Time'], y=df['Current (mA)'], name="Current"))
-fig2.add_trace(go.Scatter(x=df['Time'], y=df['Voltage (V)'], name="Voltage"))
-fig2.add_trace(go.Scatter(x=df['Time'], y=df['Power (W)'], name="Power"))
-fig2.add_trace(go.Scatter(x=df['Time'], y=df['Energy (kWh)'], name="Energy"))
-fig2.add_trace(go.Scatter(x=df['Time'], y=df['Cost (BDT)'], name="Cost"))
-fig2.update_layout(template="plotly_dark", xaxis_title="Time", yaxis_title="Values", hovermode="x unified")
-st.plotly_chart(fig2, use_container_width=True)
+# ------------------- Summary -------------------
+st.subheader("📊 Energy Summary")
+st.info(f"**Total Energy Used:** {kwh:.4f} kWh")
+st.info(f"**Estimated Cost:** ৳{cost:.2f}")
+st.info(f"**Active Duration:** {duration} min")
 
-# ------------------- Download -------------------
-if st.button("📂 Download CSV History"):
-    st.download_button("Download File", df.to_csv(index=False), file_name="energy_history.csv", mime="text/csv")
+# ------------------- History Charts -------------------
+if df.empty:
+    st.warning("No energy history data yet. Please wait 1 minute.")
+else:
+    st.subheader("📈 Historical Trends")
 
-st.caption("🔧 Developed by Momena Khatun Zinia | Tuya Cloud powered")
+    charts = {
+        "Power (W)": "Power (W)",
+        "Voltage (V)": "Voltage (V)",
+        "Current (mA)": "Current (mA)",
+        "Energy (kWh)": "Energy (kWh)",
+        "Cost (BDT)": "Cost (BDT)"
+    }
+
+    for title, column in charts.items():
+        fig = px.line(df, x="Time", y=column, title=title + " Over Time", template=plotly_template)
+        st.plotly_chart(fig, use_container_width=True)
