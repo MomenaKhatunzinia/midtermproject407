@@ -165,9 +165,14 @@ st.markdown("""
 
 st.button("🔁 Refresh Status", on_click=st.rerun)
 
+# ------------------- Load Device Data & Show Status -------------------
 with st.spinner("Loading device data..."):
     df, status = update_history_row()
     power_on, power, voltage, current_ma, kwh, cost, duration = status
+
+# ------------------- Device Status Display -------------------
+device_status = "🟢 Device is ON" if power_on else "🔴 Device is OFF"
+st.markdown(f"### {device_status}")
 
 # ------------------- Device Control Section -------------------
 st.subheader("🔌 Device Control")
